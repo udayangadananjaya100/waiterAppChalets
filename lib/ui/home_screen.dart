@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import '../data/models.dart';
 import '../state/app_controller.dart';
@@ -14,15 +15,52 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   int _tab = 0;
+  Set<String> _knownReady = {};
+
+  Set<String> _readyIds() {
+    final app = widget.controller;
+    final ownOrderIds = app.snapshot.orders
+        .where((order) => order.active && order.ownedBy(app.user!))
+        .map((order) => order.id)
+        .toSet();
+    return app.snapshot.items
+        .where(
+            (item) => ownOrderIds.contains(item.orderId) && item.readyToServe)
+        .map((item) => item.id)
+        .toSet();
+  }
+
+  void _listenForReadyItems() {
+    if (!mounted || widget.controller.user == null) return;
+    final ready = _readyIds();
+    final added = ready.difference(_knownReady);
+    _knownReady = ready;
+    if (added.isEmpty) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      HapticFeedback.mediumImpact();
+      showMessage(context,
+          '${added.length} new item${added.length == 1 ? ' is' : 's are'} ready to serve.');
+    });
+  }
+
   @override
   void initState() {
     super.initState();
+    _knownReady = _readyIds();
+    widget.controller.addListener(_listenForReadyItems);
     if (widget.controller.preferences?.getBool('guide_seen') != true) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) showGuide(context);
       });
       widget.controller.preferences?.setBool('guide_seen', true);
     }
+  }
+
+  @override
+  void dispose() {
+    widget.controller.removeListener(_listenForReadyItems);
+    super.dispose();
   }
 
   @override
@@ -665,13 +703,7 @@ class OrdersPage extends StatelessWidget {
                             money(order.confirmedTotal ?? order.total),
                             style: const TextStyle(
                                 fontSize: 11, fontWeight: FontWeight.w800)),
-                        onTap: () => showBill(
-                            context,
-                            order,
-                            app.snapshot.items
-                                .where((i) => i.orderId == order.id)
-                                .toList(),
-                            table),
+                        onTap: () => showBill(context, app, order, table),
                       )));
                 }),
               ],
@@ -814,9 +846,9 @@ class DishTile extends StatelessWidget {
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
-                            fontSize: 10, color: Palette.muted, height: 1.5)),
+                            fontSize: 12, color: Palette.muted, height: 1.5)),
                   const SizedBox(height: 9),
-                  Text(money(dish.price),
+                  Text(dish.displayPrice,
                       style: const TextStyle(
                           fontSize: 12,
                           fontWeight: FontWeight.w800,
@@ -829,7 +861,7 @@ class DishTile extends StatelessWidget {
                                 ? '${dish.available} available'
                                 : 'Currently unavailable',
                             style: TextStyle(
-                                fontSize: 10,
+                                fontSize: 11,
                                 color: dish.availableToOrder
                                     ? Palette.muted
                                     : Palette.red)))
@@ -925,12 +957,12 @@ class TeamPage extends StatelessWidget {
               leading: const Icon(Icons.info_outline),
               title: const Text('About Oruthota Service',
                   style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
-              subtitle: const Text('Version 1.0.0 • Made for your team',
+              subtitle: const Text('Version 1.0.1 • Made for your team',
                   style: TextStyle(fontSize: 11)),
               onTap: () => showAboutDialog(
                       context: context,
                       applicationName: 'Oruthota Service',
-                      applicationVersion: '1.0.0',
+                      applicationVersion: '1.0.1',
                       applicationIcon: const BrandMark(),
                       children: [
                         const Text(
@@ -1039,7 +1071,7 @@ Future<void> showGuide(BuildContext context) => showModalBottomSheet<void>(
                             ]))
                       ]))),
               const Text(
-                  'Unsent drafts stay on this screen while you move around the app. Review them before leaving or signing out.',
+                  'Unsent drafts are saved on this device while you stay signed in. Review them before signing out.',
                   style: TextStyle(fontSize: 11, color: Palette.muted)),
               const SizedBox(height: 24),
               SizedBox(

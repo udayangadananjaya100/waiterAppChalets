@@ -141,6 +141,13 @@ class Dish {
           ? batches.fold(0, (a, b) => a + b.quantity)
           : manualStock;
   bool get availableToOrder => available > 0;
+  String get displayPrice {
+    if (!needsBatch || batches.isEmpty) return money(price);
+    final prices = batches.map((batch) => batch.price).toSet().toList()..sort();
+    if (prices.length == 1) return money(prices.first);
+    return 'From ${money(prices.first)}';
+  }
+
   factory Dish.fromJson(Json j, {List<StockBatch> batches = const []}) => Dish(
       id: '${j['id']}',
       name: '${j['name']}',

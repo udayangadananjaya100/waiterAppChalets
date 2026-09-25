@@ -156,4 +156,68 @@ void main() {
     expect(dish.available, 3);
     repo.dispose();
   });
+  test('A hidden inventoried order line can still be marked served', () async {
+    var served = false;
+    final repo = LiveRepository(config, client: MockClient((r) async {
+      if (r.url.path == '/api/auth/me') {
+        return http.Response(jsonEncode({'user': staff}), 200);
+      }
+      if (r.url.path.endsWith('/orders')) {
+        return http.Response(
+            jsonEncode([
+              {
+                'id': 'o',
+                'table_id': 't',
+                'status': 'open',
+                'waiter_id': 'waiter-1',
+                'total_price': 500
+              }
+            ]),
+            200);
+      }
+      if (r.url.path.endsWith('/order_items') && r.method == 'GET') {
+        return http.Response(
+            jsonEncode([
+              {
+                'id': 'line',
+                'order_id': 'o',
+                'menu_item_id': 'hidden-drink',
+                'batch_id': 'batch',
+                'name': 'Hidden drink',
+                'price': 500,
+                'quantity': 2,
+                'served_quantity': 0,
+                'kitchen_status': 'pending'
+              }
+            ]),
+            200);
+      }
+      if (r.url.path.endsWith('/order_items') && r.method == 'PATCH') {
+        served = jsonDecode(r.body)['served_quantity'] == 2;
+        return http.Response('[{"id":"line"}]', 200);
+      }
+      if (r.url.path.endsWith('/menu-items')) {
+        return http.Response('{"menuItems":[]}', 200);
+      }
+      if (r.url.host == 'database.test') return http.Response('[]', 200);
+      return http.Response('{}', 404);
+    }));
+    final order = ServiceOrder(
+        id: 'o',
+        tableId: 't',
+        status: 'open',
+        total: 500,
+        waiterId: 'waiter-1');
+    final line = OrderLine(
+        id: 'line',
+        orderId: 'o',
+        name: 'Hidden drink',
+        price: 500,
+        quantity: 2,
+        menuItemId: 'hidden-drink',
+        batchId: 'batch');
+    await repo.serve(order, line, Staff.fromJson(staff));
+    expect(served, isTrue);
+    repo.dispose();
+  });
 }

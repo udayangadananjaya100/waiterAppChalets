@@ -15,7 +15,8 @@ The admin website URL is not present in the source repository. It must be entere
 - First-use guide, searchable tables and menu, section and ownership filters.
 - Separate draft review before sending, stock and batch selection, price and stock recheck, guest mobile field.
 - Live order and kitchen state, served quantity, guest check-in QR linking, cashier handoff and confirmed bill preview.
-- Table ownership handling, waiter release, secure cookie storage, foreground refresh, offline state and review after an uncertain write.
+- Table ownership handling, secure cookie storage, foreground refresh, offline state and review after an uncertain write.
+- Draft recovery after an app restart, shared-stock validation, ready-item alerts and live bill updates.
 - Offline Practice shift for staff training.
 
 The app intentionally does not edit sent items or take payment. The existing server does not expose a safe, atomic API for those operations; changes to a sent item are handed to the cashier to keep kitchen and stock records consistent. The server's `add-to-order` operation is not idempotent. After a lost response, the app blocks retries for that table until the waiter compares the live order and clears the draft. If the server partially applies an order, the cashier must reconcile stock and totals.

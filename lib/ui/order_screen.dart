@@ -45,29 +45,34 @@ class _OrderScreenState extends State<OrderScreen> {
   Future<void> _add(Dish dish) async {
     StockBatch? batch;
     if (dish.needsBatch) {
-      batch = await showModalBottomSheet<StockBatch>(
-          context: context,
-          useSafeArea: true,
-          builder: (context) => ListView(
-                  shrinkWrap: true,
-                  padding: const EdgeInsets.fromLTRB(22, 0, 22, 24),
-                  children: [
-                    Text('Choose a batch',
-                        style: Theme.of(context).textTheme.headlineSmall),
-                    const SizedBox(height: 8),
-                    Text(dish.name,
-                        style: const TextStyle(color: Palette.muted)),
-                    const SizedBox(height: 16),
-                    ...dish.batches.map((b) => Card(
-                        child: ListTile(
-                            title: Text(b.label),
-                            subtitle: Text(
-                                '${b.quantity} available${b.expires == null ? '' : ' • Expires ${b.expires!.toIso8601String().substring(0, 10)}'}'),
-                            trailing: Text(money(b.price),
-                                style: const TextStyle(
-                                    fontSize: 12, fontWeight: FontWeight.w700)),
-                            onTap: () => Navigator.pop(context, b))))
-                  ]));
+      if (dish.batches.length == 1) {
+        batch = dish.batches.first;
+      } else {
+        batch = await showModalBottomSheet<StockBatch>(
+            context: context,
+            useSafeArea: true,
+            builder: (context) => ListView(
+                    shrinkWrap: true,
+                    padding: const EdgeInsets.fromLTRB(22, 0, 22, 24),
+                    children: [
+                      Text('Choose a batch',
+                          style: Theme.of(context).textTheme.headlineSmall),
+                      const SizedBox(height: 8),
+                      Text(dish.name,
+                          style: const TextStyle(color: Palette.muted)),
+                      const SizedBox(height: 16),
+                      ...dish.batches.map((b) => Card(
+                          child: ListTile(
+                              title: Text(b.label),
+                              subtitle: Text(
+                                  '${b.quantity} available${b.expires == null ? '' : ' • Expires ${b.expires!.toIso8601String().substring(0, 10)}'}'),
+                              trailing: Text(money(b.price),
+                                  style: const TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w700)),
+                              onTap: () => Navigator.pop(context, b))))
+                    ]));
+      }
       if (batch == null || !mounted) return;
     }
     try {
@@ -89,6 +94,7 @@ class _OrderScreenState extends State<OrderScreen> {
         final uncertain = app.uncertainTables.contains(table.id);
         final canEdit =
             !locked && !billed && !app.offline && !uncertain && !app.busy;
+        final canServe = !locked && !app.offline && !uncertain && !app.busy;
         final shown = app.dishes
             .where((d) =>
                 (_category == 'All' || d.category == _category) &&
@@ -107,7 +113,7 @@ class _OrderScreenState extends State<OrderScreen> {
                             fontSize: 19, fontWeight: FontWeight.w800)),
                     Text('${table.section} • ${table.capacity} seats',
                         style:
-                            const TextStyle(fontSize: 10, color: Palette.muted))
+                            const TextStyle(fontSize: 11, color: Palette.muted))
                   ]),
               actions: [
                 IconButton(
@@ -116,32 +122,6 @@ class _OrderScreenState extends State<OrderScreen> {
                         ? null
                         : () => app.refresh(reloadMenu: true),
                     icon: const Icon(Icons.refresh_rounded)),
-                if (current?.ownedBy(app.user!) == true)
-                  PopupMenuButton<String>(
-                      tooltip: 'Table actions',
-                      onSelected: (value) async {
-                        if (value == 'release') {
-                          final yes = await confirm(context,
-                              title: 'Hand over this table?',
-                              message:
-                                  'The order stays open. Another waiter can take over after you release it. Any unsent draft will be cleared.',
-                              action: 'Release table');
-                          if (yes && current != null) {
-                            final success = await _action(
-                                () => app.perform(
-                                    table.id, (r, s) => r.release(current, s)),
-                                'Table released for another team member.');
-                            if (success) app.clearCart(table.id);
-                          }
-                        }
-                      },
-                      itemBuilder: (_) => [
-                            PopupMenuItem(
-                                value: 'release',
-                                enabled:
-                                    !app.busy && !uncertain && !app.offline,
-                                child: const Text('Release to another waiter'))
-                          ])
               ]),
           body: SafeArea(
               top: false,
@@ -291,7 +271,8 @@ class _OrderScreenState extends State<OrderScreen> {
                                           description:
                                               'Try another search or refresh the menu.'),
                                   ])
-                            : _liveOrder(current, locked, billed, canEdit))),
+                            : _liveOrder(
+                                current, locked, billed, canEdit, canServe))),
               ])),
           bottomNavigationBar: app.cartCount(table.id) > 0
               ? SafeArea(top: false, child: _bottomCart(canEdit))
@@ -340,8 +321,8 @@ class _OrderScreenState extends State<OrderScreen> {
                                 _tab == tab ? Palette.forest : Palette.muted)))
               ]))));
 
-  Widget _liveOrder(
-      ServiceOrder? current, bool locked, bool billed, bool canEdit) {
+  Widget _liveOrder(ServiceOrder? current, bool locked, bool billed,
+      bool canEdit, bool canServe) {
     if (current == null) {
       return ListView(
           physics: const AlwaysScrollableScrollPhysics(),
@@ -391,8 +372,7 @@ class _OrderScreenState extends State<OrderScreen> {
                           width: double.infinity,
                           child: FilledButton(
                               onPressed: current.confirmedTotal != null
-                                  ? () =>
-                                      showBill(context, current, items, table)
+                                  ? () => showBill(context, app, current, table)
                                   : null,
                               child: Text(current.confirmedTotal != null
                                   ? 'View bill • ${money(current.confirmedTotal!)}'
@@ -413,7 +393,7 @@ class _OrderScreenState extends State<OrderScreen> {
           ]),
           const SizedBox(height: 16),
           ...items.map((line) {
-            final direct =
+            final direct = line.batchId != null ||
                 app.dishes.any((d) => d.id == line.menuItemId && d.inventoried);
             final ready = line.readyToServe || direct;
             final status = line.fullyServed
@@ -486,15 +466,14 @@ class _OrderScreenState extends State<OrderScreen> {
                                       Text(
                                           '${line.served}/${line.quantity} served',
                                           style: const TextStyle(
-                                              fontSize: 10,
+                                              fontSize: 11,
                                               color: Palette.muted)),
                                     if (ready &&
                                         !line.fullyServed &&
-                                        !billed &&
                                         !locked &&
                                         current.ownedBy(app.user!))
                                       TextButton.icon(
-                                          onPressed: canEdit
+                                          onPressed: canServe
                                               ? () => _action(
                                                   () => app.perform(
                                                       table.id,
@@ -588,10 +567,14 @@ class _OrderScreenState extends State<OrderScreen> {
             const Icon(Icons.arrow_forward_rounded, size: 18)
           ])));
   Future<void> _cashier(ServiceOrder current) async {
+    final remaining = items
+        .where((line) => !line.fullyServed)
+        .fold<int>(0, (total, line) => total + line.quantity - line.served);
     final yes = await confirm(context,
         title: 'Send Table ${table.number} to the cashier?',
-        message:
-            'Your guests’ order will be sent for billing. Add all remaining items first. Only the cashier can confirm payment and close the table.',
+        message: remaining > 0
+            ? '$remaining portion${remaining == 1 ? '' : 's'} are not marked served yet. You can still mark existing items served after billing. Add all remaining items before continuing.'
+            : 'Your guests’ order will be sent for billing. Only the cashier can confirm payment and close the table.',
         action: 'Send bill');
     if (yes) {
       await _action(
@@ -905,103 +888,119 @@ class Notice extends StatelessWidget {
       ]));
 }
 
-Future<void> showBill(BuildContext context, ServiceOrder order,
-        List<OrderLine> items, DiningTable table) =>
+Future<void> showBill(BuildContext context, AppController app,
+        ServiceOrder initialOrder, DiningTable table) =>
     showModalBottomSheet<void>(
         context: context,
         isScrollControlled: true,
         useSafeArea: true,
-        builder: (context) {
-          final breakdown = order.breakdown;
-          Widget row(String label, double value, {bool total = false}) =>
-              Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 6),
-                  child: Row(children: [
-                    Expanded(
-                        child: Text(label,
+        builder: (sheetContext) => AnimatedBuilder(
+            animation: app,
+            builder: (context, _) {
+              final order = app.snapshot.orders
+                      .where((candidate) => candidate.id == initialOrder.id)
+                      .firstOrNull ??
+                  initialOrder;
+              final items = app.snapshot.items
+                  .where((item) => item.orderId == order.id)
+                  .toList();
+              final breakdown = order.breakdown;
+              Widget row(String label, double value, {bool total = false}) =>
+                  Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 6),
+                      child: Row(children: [
+                        Expanded(
+                            child: Text(label,
+                                style: TextStyle(
+                                    fontWeight: total
+                                        ? FontWeight.w800
+                                        : FontWeight.w500,
+                                    fontSize: total ? 18 : 12))),
+                        Text(money(value),
                             style: TextStyle(
                                 fontWeight:
-                                    total ? FontWeight.w800 : FontWeight.w500,
-                                fontSize: total ? 18 : 12))),
-                    Text(money(value),
-                        style: TextStyle(
-                            fontWeight:
-                                total ? FontWeight.w800 : FontWeight.w600,
-                            fontSize: total ? 18 : 12))
-                  ]));
-          return SingleChildScrollView(
-              padding: const EdgeInsets.fromLTRB(26, 0, 26, 30),
-              child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    const Center(child: BrandMark(size: 50)),
-                    const SizedBox(height: 15),
-                    const Text('Oruthota Chalets',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(fontFamily: 'Lora', fontSize: 25)),
-                    const SizedBox(height: 6),
-                    Text(
-                        'TABLE ${table.number.toString().padLeft(2, '0')} • GUEST BILL',
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(
-                            fontSize: 10,
-                            letterSpacing: 2,
-                            color: Palette.muted)),
-                    if (order.billNumber != null)
-                      Text(order.billNumber!,
-                          textAlign: TextAlign.center,
-                          style: const TextStyle(
-                              fontSize: 11, color: Palette.muted)),
-                    const SizedBox(height: 22),
-                    Center(
-                        child: StatusTag(
+                                    total ? FontWeight.w800 : FontWeight.w600,
+                                fontSize: total ? 18 : 12))
+                      ]));
+              return SingleChildScrollView(
+                  padding: const EdgeInsets.fromLTRB(26, 0, 26, 30),
+                  child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        const Center(child: BrandMark(size: 50)),
+                        const SizedBox(height: 15),
+                        const Text('Oruthota Chalets',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(fontFamily: 'Lora', fontSize: 25)),
+                        const SizedBox(height: 6),
+                        Text(
+                            'TABLE ${table.number.toString().padLeft(2, '0')} • GUEST BILL',
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                                fontSize: 10,
+                                letterSpacing: 2,
+                                color: Palette.muted)),
+                        if (order.billNumber != null)
+                          Text(order.billNumber!,
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(
+                                  fontSize: 11, color: Palette.muted)),
+                        const SizedBox(height: 22),
+                        Center(
+                            child: StatusTag(
+                                order.status == 'closed'
+                                    ? 'Settled with cashier'
+                                    : 'Total confirmed by cashier',
+                                icon: Icons.check_circle_outline)),
+                        const SizedBox(height: 24),
+                        const Divider(),
+                        const SizedBox(height: 14),
+                        ...items.map((i) => row(
+                            '${i.quantity} × ${i.name}', i.quantity * i.price)),
+                        const SizedBox(height: 12),
+                        const Divider(),
+                        const SizedBox(height: 12),
+                        row('Subtotal',
+                            number(breakdown?['subtotal'] ?? order.total)),
+                        if (breakdown != null) ...[
+                          if (number(breakdown['discount_total']) != 0)
+                            row('Discounts',
+                                -number(breakdown['discount_total'])),
+                          ...((breakdown['service_charge_lines'] as List?) ??
+                                  [])
+                              .map((c) =>
+                                  row('${c['name']}', number(c['amount']))),
+                          ...((breakdown['other_charge_lines'] as List?) ?? [])
+                              .map((c) =>
+                                  row('${c['name']}', number(c['amount']))),
+                          if (number(breakdown['vat_amount']) != 0)
+                            row('VAT (${number(breakdown['vat_rate'])}%)',
+                                number(breakdown['vat_amount'])),
+                        ] else if (order.confirmedTotal != null &&
+                            order.confirmedTotal != order.total)
+                          row('Cashier adjustments',
+                              order.confirmedTotal! - order.total),
+                        const SizedBox(height: 10),
+                        const Divider(),
+                        const SizedBox(height: 10),
+                        row('Total', order.confirmedTotal ?? order.total,
+                            total: true),
+                        const SizedBox(height: 18),
+                        Text(
                             order.status == 'closed'
-                                ? 'Settled with cashier'
-                                : 'Total confirmed by cashier',
-                            icon: Icons.check_circle_outline)),
-                    const SizedBox(height: 24),
-                    const Divider(),
-                    const SizedBox(height: 14),
-                    ...items.map((i) =>
-                        row('${i.quantity} × ${i.name}', i.quantity * i.price)),
-                    const SizedBox(height: 12),
-                    const Divider(),
-                    const SizedBox(height: 12),
-                    row('Subtotal',
-                        number(breakdown?['subtotal'] ?? order.total)),
-                    if (breakdown != null) ...[
-                      if (number(breakdown['discount_total']) != 0)
-                        row('Discounts', -number(breakdown['discount_total'])),
-                      ...((breakdown['service_charge_lines'] as List?) ?? [])
-                          .map((c) => row('${c['name']}', number(c['amount']))),
-                      ...((breakdown['other_charge_lines'] as List?) ?? [])
-                          .map((c) => row('${c['name']}', number(c['amount']))),
-                      if (number(breakdown['vat_amount']) != 0)
-                        row('VAT (${number(breakdown['vat_rate'])}%)',
-                            number(breakdown['vat_amount'])),
-                    ] else if (order.confirmedTotal != null &&
-                        order.confirmedTotal != order.total)
-                      row('Cashier adjustments',
-                          order.confirmedTotal! - order.total),
-                    const SizedBox(height: 10),
-                    const Divider(),
-                    const SizedBox(height: 10),
-                    row('Total', order.confirmedTotal ?? order.total,
-                        total: true),
-                    const SizedBox(height: 18),
-                    Text(
-                        order.status == 'closed'
-                            ? 'This order was settled by the cashier.'
-                            : 'This is a bill preview, not a payment receipt.\nPlease settle payment with the cashier.',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                            color: Palette.muted, fontSize: 11, height: 1.7)),
-                    const SizedBox(height: 26),
-                    FilledButton(
-                        onPressed: () => Navigator.pop(context),
-                        child: const Text('Back to table'))
-                  ]));
-        });
+                                ? 'This order was settled by the cashier.'
+                                : 'This is a bill preview, not a payment receipt.\nPlease settle payment with the cashier.',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                                color: Palette.muted,
+                                fontSize: 11,
+                                height: 1.7)),
+                        const SizedBox(height: 26),
+                        FilledButton(
+                            onPressed: () => Navigator.pop(sheetContext),
+                            child: const Text('Back to table'))
+                      ]));
+            }));
 
 class GuestScanner extends StatefulWidget {
   const GuestScanner({super.key});

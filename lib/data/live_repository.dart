@@ -350,6 +350,8 @@ class LiveRepository implements WaiterRepository {
     }
     if (lines.isEmpty) throw const ServiceException('Add at least one item.');
     final currentMenu = await menu();
+    final sharedDemand = <String, int>{};
+    final sharedLimits = <String, int>{};
     for (final line in lines) {
       final found = currentMenu.where((d) => d.id == line.dish.id);
       if (found.isEmpty) {
@@ -372,6 +374,11 @@ class LiveRepository implements WaiterRepository {
         throw ServiceException(
             '${dish.name} has a new price. Remove it and add it again.');
       }
+      if (line.batch != null && dish.inventoryId != null) {
+        final key = '${dish.inventoryId}:${line.batch!.id}';
+        sharedDemand[key] = (sharedDemand[key] ?? 0) + line.quantity;
+        sharedLimits[key] = batches.first.quantity;
+      }
       // The existing endpoint merges identical menu item + price, ignoring batch ID.
       final samePrice = fresh.items.where(
           (i) => i.menuItemId == dish.id && (i.price - price).abs() < .001);
@@ -379,6 +386,11 @@ class LiveRepository implements WaiterRepository {
         throw ServiceException(
             '${dish.name} is already ordered from another batch at this price. Ask the cashier to handle the batch change.');
       }
+    }
+    if (sharedDemand.entries
+        .any((entry) => entry.value > sharedLimits[entry.key]!)) {
+      throw const ServiceException(
+          'Some dishes share the same stock batch. Reduce their combined quantity and try again.');
     }
     // Never retry this endpoint automatically: it is not idempotent.
     final result = await api('/api/waiter/add-to-order', method: 'POST', body: {
@@ -438,14 +450,14 @@ class LiveRepository implements WaiterRepository {
 
   @override
   Future<void> serve(ServiceOrder order, OrderLine line, Staff staff) async {
-    final fresh = await _guard(order, staff);
+    final fresh = await _guard(order, staff, allowBilled: true);
     final matches = fresh.items.where((i) => i.id == line.id);
     if (matches.isEmpty) {
       throw const ServiceException('This item has changed. Refresh the order.');
     }
     final item = matches.first;
     final menuItems = await menu();
-    final direct =
+    final direct = item.batchId != null ||
         menuItems.any((d) => d.id == item.menuItemId && d.inventoried);
     final amount =
         direct ? item.quantity : item.readyQuantity.clamp(0, item.quantity);
@@ -466,6 +478,10 @@ class LiveRepository implements WaiterRepository {
 
   @override
   Future<void> release(ServiceOrder order, Staff staff) async {
+    if (order.billed) {
+      throw const ServiceException(
+          'A bill with the cashier cannot be handed over in the waiter app.');
+    }
     await _guard(order, staff, allowBilled: true);
     await api('/api/waiter/release-table',
         method: 'POST', body: {'table_id': order.tableId});

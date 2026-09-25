@@ -37,7 +37,7 @@ ThemeData serviceTheme() {
           fontSize: 15, fontWeight: FontWeight.w700, color: Palette.ink),
       bodyLarge: TextStyle(fontSize: 15, height: 1.6, color: Palette.ink),
       bodyMedium: TextStyle(fontSize: 13, height: 1.5, color: Palette.ink),
-      bodySmall: TextStyle(fontSize: 11, height: 1.5, color: Palette.muted),
+      bodySmall: TextStyle(fontSize: 12, height: 1.5, color: Palette.muted),
       labelLarge: TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
     ),
     appBarTheme: const AppBarTheme(
@@ -145,7 +145,7 @@ class StatusTag extends StatelessWidget {
         Flexible(
             child: Text(label,
                 style: TextStyle(
-                    fontSize: 10, fontWeight: FontWeight.w800, color: color)))
+                    fontSize: 11, fontWeight: FontWeight.w800, color: color)))
       ]));
 }
 
