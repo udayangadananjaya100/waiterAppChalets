@@ -1,0 +1,5 @@
+# Copy to key.properties and keep it out of version control.
+storePassword=YOUR_STORE_PASSWORD
+keyPassword=YOUR_KEY_PASSWORD
+keyAlias=oruthota
+storeFile=G:/private/oruthota-upload.jks

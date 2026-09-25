@@ -1,0 +1,14 @@
+.dart_tool/
+.flutter-plugins*
+.tools/
+build/
+tmp/
+android/.kotlin/
+android/local.properties
+android/key.properties
+*.jks
+*.keystore
+.idea/
+*.iml
+config.local.json
+docs/admin-baseline.json
